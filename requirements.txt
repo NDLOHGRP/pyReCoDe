@@ -1,0 +1,7 @@
+numpy
+pathlib
+zmq
+argparse
+numba
+scipy
+pims
