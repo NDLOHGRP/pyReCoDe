@@ -12,13 +12,6 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
-	#include <win32\dirent.h>
-#else
-	#include <dirent.h>
-	#include <ctype.h>
-#endif
-
 #include "reader.h"
 
 typedef struct {

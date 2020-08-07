@@ -1,8 +1,9 @@
 ### Installation
 Use the following commands to build and install  pyReCoDe:
 1. python setup.py clean --all  
-2. python setup.py build   
-3. python setup.py -r requirements.txt install --force  
+2. python setup.py build
+3. pip3 install -r requirements.txt
+4. python setup.py install --force  
 
 To test the installation is successful, run a minimal read/write test using the following commands:
 1. cd tests (changing directory to the 'tests' folder is necessary)

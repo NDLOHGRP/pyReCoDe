@@ -1,10 +1,9 @@
 from setuptools import setup, Extension, find_packages
-import numpy as np
 
 module1 = Extension('c_recode',
                     define_macros=[('MAJOR_VERSION', '0'),
                                    ('MINOR_VERSION', '1')],
-                    include_dirs=['pyrecode/c_extensions', np.get_include()],
+                    include_dirs=['pyrecode/c_extensions'],
                     sources=['pyrecode/pyrecode.cpp'],
                     extra_compile_args=["-O3"])
 
