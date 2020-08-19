@@ -288,16 +288,26 @@ class ReCoDeWriter:
         self._do_sanity_checks(data)
 
         # determine the number of available frames for this thread
+        # this is probably should be done by the caller and passed as params frame_offset and available_frames
         if self._init_params.mode == 'batch':
+            # batch and stream modes use slightly different calculations when computing frame_offset
+            # in batch mode ReCoDe nodes are numbered from 0, in stream mode ReCoDe nodes are numbered from 1
+            # as the recode_server node is 0
             n_frames_in_chunk = self._input_params.nz
+            n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
+            frame_offset = self._node_id * n_frames_per_thread
+            available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
+
         elif self._init_params.mode == 'stream':
             n_frames_in_chunk = self._source_shape[0]
+            n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
+            frame_offset = (self._node_id - 1) * n_frames_per_thread
+            available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
+
         else:
             raise ValueError("Invalid input params: mode. Can be 'batch' or 'stream'.")
 
-        n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
-        frame_offset = (self._node_id-1) * n_frames_per_thread
-        available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
+        print(frame_offset, available_frames)
 
         # read the thread-specific data from chunk into memory
         stt = datetime.now()
