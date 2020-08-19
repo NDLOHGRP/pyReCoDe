@@ -1,6 +1,7 @@
 #include <Python.h>
 #include "structmember.h"
 
+/*
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
 
@@ -11,6 +12,7 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
+*/
 
 #include "reader.h"
 

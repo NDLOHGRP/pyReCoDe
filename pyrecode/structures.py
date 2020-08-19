@@ -65,17 +65,18 @@ class ReCoDeStructures:
         :param metadata: dictionary metadata values for this frame
         :return: int size of frame data in bytes
         """
+
         if reduction_level == 1 and rc_operation_mode == 0:
             return self._binary_image_sz_bytes + metadata['bytes_in_packed_pixvals']
 
         if reduction_level == 1 and rc_operation_mode == 1:
-            return metadata['bytes_in_compressed_binary_map'] + metadata['bytes_in compressed_pixvals']
+            return metadata['bytes_in_compressed_binary_map'] + metadata['bytes_in_compressed_pixvals']
 
         if reduction_level == 2 and rc_operation_mode == 0:
             return self._binary_image_sz_bytes + metadata['bytes_in_packed_summary_stats']
 
         if reduction_level == 2 and rc_operation_mode == 1:
-            return metadata['bytes_in_compressed_binary_map'] + metadata['bytes_in compressed_summary_stats']
+            return metadata['bytes_in_compressed_binary_map'] + metadata['bytes_in_compressed_summary_stats']
 
         if reduction_level == 3 and rc_operation_mode == 0:
             return self._binary_image_sz_bytes

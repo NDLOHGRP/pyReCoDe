@@ -1,6 +1,9 @@
+import os
 import math
 import numpy as np
+import sys
 from scipy.sparse import coo_matrix
+from collections import deque
 
 from pyrecode.misc import get_dtype_string, map_dtype
 import pyrecode.recode_compressors as compressors
@@ -18,6 +21,7 @@ class ReCoDeReader:
             self._is_intermediate = 1
         else:
             self._is_intermediate = 0
+        self._file_size = None
         self._header = None
         self._frame_metadata = None
         self._seek_table = None
@@ -32,10 +36,19 @@ class ReCoDeReader:
         self._numpy_dtype = None
         self._decompressor_context = None
 
-    def open(self):
-        self._load_header()
+    def open(self, print_header=True):
+
+        # load header (closes file after reading header)
+        self._load_header(print_header)
         compressors.import_checks(self._header)
+
+        # open file pointer again and get file size
         self._fp = open(self._source_filename, "rb")
+        self._fp.seek(0, 2)
+        self._file_size = self._fp.tell()
+        self._fp.seek(0, 0)
+
+        # initialize
         self._initialize()
         self._create_read_buffers()
         self._load_seek_table()
@@ -52,11 +65,12 @@ class ReCoDeReader:
         self._c_reader._open_file(self._source_filename)
     '''
 
-    def _load_header(self):
+    def _load_header(self, print_header=True):
         self._rc_header = ReCoDeHeader()
         self._rc_header.load(self._source_filename)
         self._header = self._rc_header.as_dict()
-        self._rc_header.print()
+        if print_header:
+            self._rc_header.print()
 
     def _initialize(self):
         self._structures = ReCoDeStructures(self._header)
@@ -83,7 +97,7 @@ class ReCoDeReader:
         if self._is_intermediate:
             self._frame_data_start_position = offset
         else:
-            self._frame_data_start_position = offset + self._header['nz'] * self._sz_frame_metadata
+            self._frame_data_start_position = int(offset + self._header['nz'] * self._sz_frame_metadata)
 
         # size of sparse frames
         if self._header['reduction_level'] in [1, 2]:
@@ -131,7 +145,7 @@ class ReCoDeReader:
             if 'nz' not in self._header:
                 raise ValueError('Attempting to read seek table before reading header')
 
-            self._frame_metadata = np.zeros((self._header['nz'], n_metadata_elements), dtype=np.uint32)
+            self._frame_metadata = []
 
             # move to start of frame data
             self._fp.seek(self._rc_header.get_frame_data_offset(), 0)
@@ -139,20 +153,20 @@ class ReCoDeReader:
             for _frame_index in range(self._header['nz']):
                 d = {}
                 for field in sm:
-                    d[field] = np.frombuffer(self._fp.read(field['bytes']), dtype=field['dtypes'])[0]
+                    d[field['name']] = np.frombuffer(self._fp.read(field['bytes']), dtype=field['dtype'])[0]
                 for field in nsm:
                     d_type = get_dtype_string(nsm[field])
-                    d[field] = np.frombuffer(self._fp.read(d_type.itemsize), dtype=d_type)
-                self._frame_metadata[_frame_index] = d
+                    d[field['name']] = np.frombuffer(self._fp.read(d_type.itemsize), dtype=d_type)
+                self._frame_metadata.append(d)
 
             # create a seek table, that maintains the offset of each frame relative to self._frame_data_start_position
             # only available for ReCoDe files (not intermediate files)
             self._seek_table = np.zeros((self._header['nz'], 2), dtype=np.uint32)
-            for _frame_index in range(1, self._header['nz']):
+            for _frame_index in range(self._header['nz']):
                 self._seek_table[_frame_index, 0] = self._structures.get_frame_data_size(
-                    self._header['reduction_level'], self._header['rc_operation_mode'],
-                    self._frame_metadata[_frame_index])
-            self._seek_table[:, 1] = np.cumsum(self._seek_table[:, 0])
+                                                    self._header['reduction_level'], self._header['rc_operation_mode'],
+                                                    self._frame_metadata[_frame_index])
+            self._seek_table[1:, 1] = np.cumsum(self._seek_table[:-1, 0])
 
     def get_header(self):
         return self._rc_header
@@ -182,7 +196,7 @@ class ReCoDeReader:
 
         # move to start of requested frame's data
         s = self._frame_data_start_position
-        self._fp.seek(s + self._seek_table[z, 1], int(0))
+        self._fp.seek(s + self._seek_table[z, 1], 0)
 
         # load and decompress (if necessary)
         if self._header['reduction_level'] == 2:
@@ -206,12 +220,17 @@ class ReCoDeReader:
 
     def get_next_frame(self):
 
-        z = self._current_frame_index
-        if z == 0:
+        if self._current_frame_index == 0:
             self._fp.seek(self._frame_data_start_position, 0)
 
-        if z >= self._header['nz']:
-            raise ValueError('Requested frame index is greater than number of frames in dataset')
+        # safety check
+        if self._file_size - self._fp.tell() == 0:
+            print('Reached EoF after ' + str(self._current_frame_index) + ' frames: Quitting')
+            return None
+
+        if not self._is_intermediate:
+            if self._current_frame_index >= self._header['nz']:
+                raise ValueError('Requested frame index is greater than number of frames in dataset')
 
         # if is an intermediate file, load metadata. For ReCoDe file metadata has been loaded in _load_seek_table
         if self._is_intermediate:
@@ -223,14 +242,15 @@ class ReCoDeReader:
             nsm = self._rc_header.non_standard_metadata_sizes.values()
 
             d = {}
-            z = np.frombuffer(self._fp.read(4), dtype=np.uint32)[0]
+            frame_id = np.frombuffer(self._fp.read(4), dtype=np.uint32)[0]
             for field in sm:
                 d[field['name']] = np.frombuffer(self._fp.read(field['bytes']), dtype=field['dtype'])[0]
             for field in nsm:
                 d_type = get_dtype_string(nsm[field])
                 d[field['name']] = np.frombuffer(self._fp.read(d_type.itemsize), dtype=d_type)[0]
         else:
-            d = self._frame_metadata[z]
+            frame_id = self._current_frame_index
+            d = self._frame_metadata[frame_id]
 
         # load and decompress (if necessary)
         if self._header['reduction_level'] == 2:
@@ -240,7 +260,7 @@ class ReCoDeReader:
 
         # pack and return
         if sparse_d is None:
-            print('Reached EoF after ' + str(z) + ' frames: Quitting')
+            print('Reached EoF after ' + str(self._current_frame_index) + ' frames: Quitting')
             self._header['nz'] = self._current_frame_index
             return None
         else:
@@ -249,17 +269,111 @@ class ReCoDeReader:
             else:
                 frame_dict = {'metadata': d, 'data': sparse_d}
 
-            self._current_frame_index = z + 1
-            return {z: frame_dict}
+            self._current_frame_index += 1
+            return {frame_id: frame_dict}
+
+    def get_next_frame_raw(self, read_data=True):
+
+        if self._current_frame_index == 0:
+            self._fp.seek(self._frame_data_start_position, 0)
+
+        if not self._is_intermediate:
+            if self._current_frame_index >= self._header['nz']:
+                raise ValueError('Requested frame index is greater than number of frames in dataset')
+
+        # if is an intermediate file, load metadata. For ReCoDe file metadata has been loaded in _load_seek_table
+        if self._is_intermediate:
+
+            # description of standard metadata (list of dicts)
+            sm = self._structures.standard_frame_metadata_structure_for(self._header['reduction_level'],
+                                                                        self._header['rc_operation_mode'])
+            # dictionary of non-standard metadata
+            nsm = self._rc_header.non_standard_metadata_sizes.values()
+
+            d = {}
+            if self._file_size - self._fp.tell() == 0:
+                print('Reached EoF after ' + str(self._current_frame_index) + ' frames: Quitting')
+                return None
+
+            frame_id = np.frombuffer(self._fp.read(4), dtype=np.uint32)[0]
+            for field in sm:
+                d[field['name']] = np.frombuffer(self._fp.read(field['bytes']), dtype=field['dtype'])[0]
+            for field in nsm:
+                d_type = get_dtype_string(nsm[field])
+                d[field['name']] = np.frombuffer(self._fp.read(d_type.itemsize), dtype=d_type)[0]
+
+        else:
+            frame_id = self._current_frame_index
+            d = self._frame_metadata[frame_id]
+
+        # load raw data
+        raw_d = self._get_frame_raw(d, read_data=read_data)
+
+        # pack and return
+        if raw_d is None:
+            print('Reached EoF after ' + str(self._current_frame_index) + ' frames: Quitting')
+            self._header['nz'] = self._current_frame_index
+            return None
+        else:
+            frame_dict = {'metadata': d, 'data': raw_d}
+            self._current_frame_index += 1
+            return {frame_id: frame_dict}
 
     def close(self):
         self._fp.close()
+
+    def seek_to_frame_data(self):
+        # get the starting position of frame data (start of frame 0 metadata for intermediate,
+        # start of frame 0 data for recode file)
+        offset = self._rc_header.get_frame_data_offset()
+        if self._is_intermediate:
+            self._frame_data_start_position = offset
+        else:
+            self._frame_data_start_position = offset + self._header['nz'] * self._sz_frame_metadata
+        self._fp.seek(self._frame_data_start_position, 0)
+
+    def _get_frame_raw(self, frame_metadata, read_data=True):
+
+        sz_binary_map = 0
+        if self._header['rc_operation_mode'] == 0:
+            sz_binary_map = self._structures.binary_image_sz_bytes
+        elif self._header['rc_operation_mode'] == 1:
+            sz_binary_map = frame_metadata['bytes_in_compressed_binary_map']
+
+        if read_data:
+            binary_map = self._fp.read(sz_binary_map)
+        else:
+            binary_map = None
+            self._fp.seek(sz_binary_map, 1)
+
+        if self._header['reduction_level'] in [1, 2]:
+            sz_pixvals = 0
+            if self._header['reduction_level'] == 1 and self._header['rc_operation_mode'] == 0:
+                sz_pixvals = frame_metadata['bytes_in_packed_pixvals']
+            elif self._header['reduction_level'] == 1 and self._header['rc_operation_mode'] == 1:
+                sz_pixvals = frame_metadata['bytes_in_compressed_pixvals']
+            elif self._header['reduction_level'] == 2 and self._header['rc_operation_mode'] == 0:
+                sz_pixvals = frame_metadata['bytes_in_packed_summary_stats']
+            elif self._header['reduction_level'] == 2 and self._header['rc_operation_mode'] == 1:
+                sz_pixvals = frame_metadata['bytes_in_compressed_summary_stats']
+
+            if read_data:
+                pixvals = self._fp.read(sz_pixvals)
+            else:
+                pixvals = None
+                self._fp.seek(sz_pixvals, 1)
+
+            return {'binary_map': binary_map, 'pixvals': pixvals}
+
+        else:
+            return {'binary_map': binary_map}
 
     def _get_frame_sparse(self, frame_metadata):
 
         if self._header['reduction_level'] == 1 and self._header['rc_operation_mode'] == 0:
             binary_map = self._fp.read(self._structures.binary_image_sz_bytes)
             pixvals = self._fp.read(frame_metadata['bytes_in_packed_pixvals'])
+
             n = self._c_reader.get_frame_sparse(self._header['reduction_level'], binary_map, pixvals, self._frame_buffer)
 
             if n != 0:
@@ -271,6 +385,7 @@ class ReCoDeReader:
         if self._header['reduction_level'] == 1 and self._header['rc_operation_mode'] == 1:
             compressed_binary_map = self._fp.read(frame_metadata['bytes_in_compressed_binary_map'])
             compressed_pixvals = self._fp.read(frame_metadata['bytes_in_compressed_pixvals'])
+
             decompressed_binary_map = compressors.de_compress(self._header['compression_scheme'], compressed_binary_map,
                                                               self._decompressor_context)
             decompressed_pixvals = compressors.de_compress(self._header['compression_scheme'], compressed_pixvals,
@@ -352,6 +467,117 @@ class ReCoDeReader:
         a = np.frombuffer(self._summary_stat_buffer, dtype=self._header['target_dtype'], count=num_puddles)
         d = np.array(a, dtype=self._header['target_dtype'])
         return d
+
+    def copy_header_to(self, target_fp):
+        self._fp.seek(0, 0)
+        b = self._fp.read(self._rc_header.recode_header_length)
+        target_fp.write(b)
+
+    @property
+    def sz_frame_metadata(self):
+        return self._sz_frame_metadata
+
+
+def merge_parts(folder_path, base_filename, num_parts):
+
+    # get number of frames
+    intermediate_files = []
+    num_frames = np.zeros(num_parts, dtype=np.uint64)
+    for index in range(num_parts):
+        inter_file_name = os.path.join(folder_path, base_filename + '_part' + '{0:03d}'.format(index))
+        intermediate_files.append(inter_file_name)
+        recode_reader = ReCoDeReader(inter_file_name, is_intermediate=True)
+        recode_reader.open(print_header=False)
+        nz = 0
+        f = recode_reader.get_next_frame_raw(read_data=False)
+        while f:
+            nz += 1
+            f = recode_reader.get_next_frame_raw(read_data=False)
+        num_frames[index] = nz
+        recode_reader.close()
+
+    total_frames = np.sum(num_frames)
+
+    # prepare target (merged) ReCoDe file
+    # serialize ReCoDe header
+    # Note: copy_header_to() moves file pointer of source to end of ReCoDe header, therefore close() and reopen()
+    _target_file = open(os.path.join(folder_path, base_filename), 'wb')
+    recode_reader_0 = ReCoDeReader(intermediate_files[0], is_intermediate=True)
+    recode_reader_0.open(print_header=False)
+    recode_reader_0.copy_header_to(_target_file)
+    recode_reader_0.close()
+
+    # initialize readers and populate queues
+    readers = []
+    queues = []
+    orders = np.ones(num_parts, dtype=np.uint64)
+    for part_index in range(num_parts):
+        recode_reader = ReCoDeReader(intermediate_files[part_index], is_intermediate=True)
+        recode_reader.open(print_header=False)
+        readers.append(recode_reader)
+        d = deque(maxlen=1)
+        f = readers[part_index].get_next_frame_raw()
+        if f is not None:
+            d.append(f)
+            queues.append(d)
+            orders[part_index] = list(f.keys())[0]
+        else:
+            orders[part_index] = np.iinfo(np.uint64).max
+
+    # skip space for metadata
+    sz_metadata = int(readers[0].sz_frame_metadata * total_frames)
+    _target_file.seek(sz_metadata, 1)
+
+    # merge frame data
+    metadata = []
+    for frame_index in range(total_frames):
+
+        # search frames in queues, to find the one with the lowest frame_id
+        _select = np.argmin(orders)
+
+        # pop that frame, serialize data to file, hold metadata in list
+        f = queues[_select].popleft()
+        frame_id = list(f.keys())[0]
+        metadata.append(f[frame_id]['metadata'])
+        for field in f[frame_id]['data']:
+            _target_file.write(f[frame_id]['data'][field])
+
+        # load next raw frame into the emptied queue
+        f = readers[_select].get_next_frame_raw()
+        if f is not None:
+            queues[_select].append(f)
+            orders[_select] = frame_id
+        else:
+            orders[_select] = np.iinfo(np.uint64).max
+
+        # if all part files are done, then break loop
+        all_are_done = True
+        for part_index in range(num_parts):
+            if not orders[part_index] == np.iinfo(np.uint64).max:
+                all_are_done = False
+
+        if all_are_done:
+            break
+
+    # to serialize metadata, seek to the start of metadata
+    _target_file.seek(readers[0]._rc_header._rc_header_length + readers[0]._header['source_header_length'], 0)
+
+    # serialize metadata (use len(metadata) and not total_frames, as the actual number of frames may be different from
+    # the information in the intermediate headers
+    for frame_index in range(len(metadata)):
+        for field in metadata[frame_index]:
+            if not field == 'frame_id':
+                _target_file.write(metadata[frame_index][field])
+
+    # update the number of frames based on the actual number of frames found: len(metadata)
+    rc_header = readers[0].get_header()
+    nz_position = rc_header.get_field_position_in_bytes('nz')
+    _target_file.seek(nz_position, 0)
+    _target_file.write(len(metadata).to_bytes(rc_header.get_definition('nz')['bytes'], sys.byteorder))
+    _target_file.close()
+
+    for part_index in range(num_parts):
+        readers[part_index].close()
 
 
 if __name__ == "__main__":

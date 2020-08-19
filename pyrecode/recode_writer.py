@@ -34,8 +34,8 @@ class ReCoDeWriter:
         image_filename : string
             file to be processed. If processing in-memory data, this should be the desired output file name
         dark_data : numpy array
-            calibration_data (required if dark_filename is None), 
-            if both dark_data and dark_filename are given, dark_data will be used and dark_filename will be ignored
+            calibration_data (required if calibration_filename is None),
+            if both dark_data and calibration_filename are given, dark_data will be used and calibration_filename will be ignored
         dark_filename : string
             file containing calibration data (required if dark_data is None)
         output_directory : string
@@ -67,9 +67,9 @@ class ReCoDeWriter:
 
         # parse and validate initialization params
         self._init_params = InitParams(mode, output_directory, image_filename=image_filename,
-                                       dark_filename=dark_filename, params_filename=params_filename,
+                                       calibration_filename=dark_filename, params_filename=params_filename,
                                        validation_frame_gap=validation_frame_gap, log_filename=log_filename,
-                                       run_name=run_name, verbosity=verbosity, use_C=use_c)
+                                       run_name=run_name, verbosity=verbosity, use_c=use_c)
 
         # parse and validate input params
         if input_params is None:
@@ -82,9 +82,9 @@ class ReCoDeWriter:
             raise ValueError('Invalid input params')
 
         # check if initialization and input params are consistent
-        if self._init_params.use_C:
+        if self._init_params.use_c:
             if self._input_params.source_numpy_dtype != np.uint16 or self._input_params.target_numpy_dtype != np.uint16:
-                raise ValueError('use_C=True can only be used if source and target dtypes are both unsigned 16-bit')
+                raise ValueError('use_c=True can only be used if source and target dtypes are both unsigned 16-bit')
 
         # create ReCoDe header
         self._rc_header = ReCoDeHeader()
@@ -100,31 +100,34 @@ class ReCoDeWriter:
 
         # load and validate calibration frame
         if dark_data is None:
-            if self._input_params.dark_file_type == rc.FILE_TYPE_MRC:
-                t = MRCReader(str(self._init_params.dark_filename))
+            if self._input_params.calibration_file_type == rc.FILE_TYPE_MRC:
+                _t = MRCReader(self._init_params.calibration_filename)
 
-            elif self._input_params.dark_file_type == rc.FILE_TYPE_SEQ:
-                t = SEQReader(str(self._init_params.dark_filename))
+            elif self._input_params.calibration_file_type == rc.FILE_TYPE_SEQ:
+                _t = SEQReader(self._init_params.calibration_filename)
 
-            elif self._input_params.dark_file_type == rc.FILE_TYPE_BINARY:
-                t = read_file(str(self._init_params.dark_filename), self._header['ny'], self._header['nx'],
+            elif self._input_params.calibration_file_type == rc.FILE_TYPE_BINARY:
+                _t = read_file(self._init_params.calibration_filename, self._header['ny'], self._header['nx'],
                               self._input_params.source_numpy_dtype)
             else:
                 raise NotImplementedError("No implementation available for loading calibration file of type 'Other'")
+            t = np.squeeze(_t[0])
         else:
             t = dark_data
 
+        print('Source shape:', t.shape)
         if self._header['ny'] != t.shape[0] or self._header['nx'] != t.shape[1]:
             raise RuntimeError('Data and Calibration frames have different shapes')
 
         self._calibration_frame = t
-        self._calibration_frame_p_threshold = self._calibration_frame + self._input_params.dark_threshold_epsilon
-        if self._input_params.dark_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
-            t.close()
+        self._calibration_frame_p_threshold = self._calibration_frame + self._input_params.calibration_threshold_epsilon
+        if self._input_params.calibration_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
+            _t.close()
 
         # ensure calibration frame has the same data type as source
         self._src_dtype = self._input_params.source_numpy_dtype
         if self._calibration_frame.dtype != self._src_dtype:
+            print("calibration data type =", self._calibration_frame.dtype, "source data type =", self._src_dtype)
             warnings.warn('Calibration data type not same as source. Attempting to cast.')
             self._calibration_frame = self._calibration_frame.astype(self._src_dtype)
             self._calibration_frame_p_threshold = self._calibration_frame_p_threshold.astype(self._src_dtype)
@@ -156,7 +159,7 @@ class ReCoDeWriter:
 
         self._structures = ReCoDeStructures(self._header)
 
-        if self._init_params.use_C:
+        if self._init_params.use_c:
             self._c_reader = None
             self._pixvals = None
             self._packed_pixvals = None
@@ -177,7 +180,11 @@ class ReCoDeWriter:
         """
 
         # create part-file
-        base_filename = self._init_params.image_filename.stem
+        if self._init_params.mode == 'batch':
+            base_filename = Path(self._init_params.image_filename).stem
+        elif self._init_params.mode == 'stream':
+            base_filename = self._init_params.run_name
+
         self._intermediate_file_name = os.path.join(self._init_params.output_directory, base_filename +
                                                     '.rc' + str(self._input_params.reduction_level) +
                                                     '_part' + '{0:03d}'.format(self._node_id))
@@ -207,7 +214,7 @@ class ReCoDeWriter:
         self._rct_buffer_fill_position = -1
         self._available_buffer_space = self._buffer_sz
 
-        if self._init_params.use_C:
+        if self._init_params.use_c:
             self._c_reader = c_recode.Reader()
             _max_sz = int(math.ceil((_n_pixels_in_frame * self._input_params.source_bit_depth * 1.0) / 8.0))
             self._pixvals = memoryview(bytearray(_n_pixels_in_frame * _bytes_per_pixel))
@@ -232,11 +239,11 @@ class ReCoDeWriter:
         # get source file headers
         if data is None:
             if self._input_params.source_file_type == rc.FILE_TYPE_MRC:
-                self._source = MRCReader(str(self._init_params.image_filename))
+                self._source = MRCReader(self._init_params.image_filename)
                 self._source_shape = self._source.shape
 
             elif self._input_params.source_file_type == rc.FILE_TYPE_SEQ:
-                self._source = SEQReader(str(self._init_params.image_filename))
+                self._source = SEQReader(self._init_params.image_filename)
                 self._source_shape = self._source.shape
 
             elif self._input_params.source_file_type == rc.FILE_TYPE_BINARY:
@@ -267,7 +274,7 @@ class ReCoDeWriter:
                 self._header['nz'] = self._input_params.num_frames
 
         # close source file to reduce read overhead
-        if self._input_params.dark_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
+        if self._input_params.calibration_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
             self._source.close()
 
     def run(self, data=None):
@@ -289,13 +296,13 @@ class ReCoDeWriter:
             raise ValueError("Invalid input params: mode. Can be 'batch' or 'stream'.")
 
         n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
-        frame_offset = self._node_id * n_frames_per_thread
+        frame_offset = (self._node_id-1) * n_frames_per_thread
         available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
 
         # read the thread-specific data from chunk into memory
         stt = datetime.now()
         if data is None:
-            with emfile(str(self._init_params.image_filename), self._input_params.source_file_type, mode="r") as f:
+            with emfile(self._init_params.image_filename, self._input_params.source_file_type, mode="r") as f:
                 data = f[frame_offset:frame_offset + available_frames]
         else:
             data = data[frame_offset:frame_offset + available_frames]
@@ -317,7 +324,7 @@ class ReCoDeWriter:
 
         # map L4 centroiding scheme code to string
         _centroiding_scheme = 'weighted_average'
-        if self._header['reduction_level'] == 2:
+        if self._header['reduction_level'] == 4:
 
             if self._header['L4_centroiding'] == 1:
                 _centroiding_scheme = 'weighted_average'
@@ -325,7 +332,7 @@ class ReCoDeWriter:
             elif self._header['L4_centroiding'] == 2:
                 _centroiding_scheme = 'max'
 
-            elif self._header['L4_centroiding'] == 2:
+            elif self._header['L4_centroiding'] == 3:
                 _centroiding_scheme = 'unweighted'
 
         # process frames
@@ -419,7 +426,7 @@ class ReCoDeWriter:
             if self._input_params.source_bit_depth % 8 == 0:
                 packed_pixel_intensities = pixel_intensities.tobytes()
             else:
-                if self._init_params.use_C:
+                if self._init_params.use_c:
                     n_pixels = len(pixel_intensities)
                     n_packed = int(math.ceil((n_pixels * self._input_params.source_bit_depth * 1.0) / 8.0))
                     b = pixel_intensities.tobytes()

@@ -285,11 +285,17 @@ class ReCoDeServer:
         self._max_attempts = 10
         self._max_non_responsive_time = 15
 
-    def run(self, init_params):
+    def run(self, init_params, input_params=None):
 
         self._init_params = init_params
-        self._input_params = InputParams()
-        self._input_params.load(Path(self._init_params._params_filename))
+
+        # parse and validate input params
+        if input_params is None:
+            self._input_params = InputParams()
+            self._input_params.load(Path(self._init_params.params_filename))
+        else:
+            self._input_params = input_params
+
         self._num_threads = self._input_params.num_threads
 
         manager = Manager()
@@ -298,7 +304,7 @@ class ReCoDeServer:
         self._node_state_update_timestamps = manager.dict()
         self._context = zmq.Context()
 
-        self._session_id = numpy.random.randint(10000, 11000)
+        self._session_id = np.random.randint(10000, 11000)
         nodes = []
         node_clients = []
 
@@ -373,7 +379,8 @@ class ReCoDeServer:
                 # if rct thread i has not already acknowledged
                 if self._node_states[node.token.node_id] != rc.STATUS_CODE_ERROR and not _node_acknowledged[i]:
                     # try (re)sending a message
-                    m = MessageData(session_id, rc.MESSAGE_TYPE_REQUEST, msg_text, mapped_data={'req_id': req_id})
+                    m = MessageData(session_id, rc.MESSAGE_TYPE_REQUEST, msg_text, mapped_data={'req_id': req_id},
+                                    source_process_id=self._node_token.node_id, target_process_id=node.token.node_id)
                     if self._node_states[node.token.node_id] == rc.STATUS_CODE_AVAILABLE:
                         _node_acknowledged[i] = node.send_request(m)
                         print('RQM sent to server', i, '(port', node.token.server_port, '):')
@@ -420,9 +427,6 @@ class ReCoDeServer:
         for f in os.listdir(source_dir):
             os.remove(os.path.join(source_dir, f))
 
-        with open(os.path.join('..', 'temp', 'interrupt_state'), 'w') as f:
-            f.write('0\n')
-
         q = queue.Queue()
         queued_files = {}
         is_first = True
@@ -462,7 +466,7 @@ class ReCoDeServer:
                 # Wait for all threads to finish or max timeout to be reached
                 all_nodes_free = False
                 wait_time = (datetime.now() - st).total_seconds()
-                while all_nodes_free == False and wait_time < self._max_non_responsive_time:
+                while all_nodes_free is False and wait_time < self._max_non_responsive_time:
                     time.sleep(0.1)
                     all_nodes_free = True
                     for i, node in enumerate(node_clients):
@@ -476,18 +480,11 @@ class ReCoDeServer:
                 count += 1
 
                 # Delete
-                print("Monitor Thread: Clearing " + source_dir)
+                print("Monitor Thread: Clearing from " + source_dir)
                 start_time = time.time()
                 os.remove(join(source_dir, "Next_Stream.seq"))
                 elapsed_time = time.time() - start_time
                 print("Monitor Thread: Cleared in " + str(elapsed_time) + " seconds.\n")
-
-                # Check for interrupts
-                with open(os.path.join('..', 'temp', 'interrupt_state'), 'r') as f:
-                    content = f.readline()
-                    content = content.strip()
-                    has_interrupt = int(content) == 1
-                    print("Interrupted")
 
         # print(f_list)
         # print('{0:d} files in Queue.'.format(q.qsize()))
@@ -511,7 +508,7 @@ class ReCoDeServer:
         # Wait for all threads to finish or max timeout to be reached
         all_nodes_free = False
         wait_time = (datetime.now() - st).total_seconds()
-        while all_nodes_free == False and wait_time < self._max_non_responsive_time:
+        while all_nodes_free is False and wait_time < self._max_non_responsive_time:
             time.sleep(0.1)
             all_nodes_free = True
             for i, node in enumerate(node_clients):
@@ -631,14 +628,30 @@ class ReCoDeNode:
 
     def _send_ack(self, md):
         m = MessageData(
-            md.session_id, rc.MESSAGE_TYPE_ACK_RESPONSE, 'ack', mapped_data={'req_id': md.mapped_data['req_id']}
+            md.session_id, rc.MESSAGE_TYPE_ACK_RESPONSE, 'ack', mapped_data={'req_id': md.mapped_data['req_id']},
+            source_process_id=self._pid, target_process_id=0
         ).to_json()
         self._socket.send_json(m)
 
     def _open(self):
         # create ReCoDeWriter depending on mode, if mode is stream image_filename is path_to_ramdisk\Next_Stream.seq
         # load calibration data
-        self._recode_writer = ReCoDeWriter()
+        self._recode_writer = ReCoDeWriter(image_filename=os.path.join(self._init_params.directory_path, "Next_Stream.seq"),
+                                           dark_data=None,
+                                           dark_filename=self._init_params.calibration_filename,
+                                           output_directory=self._init_params.output_directory,
+                                           input_params=None,
+                                           params_filename=self._init_params.params_filename,
+                                           mode='stream',
+                                           validation_frame_gap=self._init_params.validation_frame_gap,
+                                           log_filename=self._init_params.log_filename,
+                                           run_name=self._init_params.run_name,
+                                           verbosity=self._init_params.verbosity,
+                                           use_c=self._init_params.use_c,
+                                           max_count=self._init_params.max_count,
+                                           chunk_time_in_sec=self._init_params.chunk_time_in_sec,
+                                           node_id=self._pid,
+                                           buffer_size_in_frames=10)
 
     def _start(self):
         # create output rc part file
@@ -686,7 +699,7 @@ if __name__ == "__main__":
     init_params = InitParams(args.mode, args.out_dir, image_filename=args.source, directory_path=args.source,
                              calibration_file=args.calibration_file, params_filename=args.params_file,
                              validation_frame_gap=args.validation_frame_gap, log_filename=args.log_file,
-                             run_name=args.run_name, verbosity=args.verbosity, use_C=False, max_count=args.max_count,
+                             run_name=args.run_name, verbosity=args.verbosity, use_c=False, max_count=args.max_count,
                              chunk_time_in_sec=args.chunk_time_in_sec)
 
     if not init_params.validate():

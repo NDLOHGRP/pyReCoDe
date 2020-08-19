@@ -6,9 +6,9 @@ from .misc import map_dtype
 
 class InitParams:
 
-    def __init__(self, mode, output_directory, image_filename='', directory_path='', dark_filename='',
+    def __init__(self, mode, output_directory, image_filename='', directory_path='', calibration_filename='',
                  params_filename='', validation_frame_gap=-1, log_filename='recode.log', run_name='run',
-                 verbosity=0, use_C=False, max_count=-1, chunk_time_in_sec=0):
+                 verbosity=0, use_c=False, max_count=-1, chunk_time_in_sec=0):
         """
         Validates and holds user specified parameters for initializing ReCoDe.
 
@@ -24,7 +24,7 @@ class InitParams:
             file to be processed when mode is 'batch', ignored when mode is 'stream'
         directory_path : string
             folder to be processed when mode is 'stream', ignored when mode is 'batch'
-        dark_filename : string
+        calibration_filename : string
             file containing calibration data (required)
         params_filename : string
             file containing input parameters (required)
@@ -34,7 +34,7 @@ class InitParams:
             the name of the log file
         run_name : string
             the name used to identify this run in the log file
-        use_C : boolean
+        use_c : boolean
             indicates if the optimized C implementation will be used
         max_count : int
             maximum number of chunks to process when mode is 'stream', ignored when mode is 'batch'
@@ -45,18 +45,20 @@ class InitParams:
         self._mode = mode.strip().lower()
         self._verbosity = verbosity
         self._validation_frame_gap = validation_frame_gap
-        self._image_filename = Path(image_filename)
-        self._dark_filename = Path(dark_filename)
-        self._params_filename = Path(params_filename)
-        self._output_directory = Path(output_directory)
-        self._log_filename = Path(log_filename)
+        self._image_filename = image_filename
+        self._calibration_filename = calibration_filename
+        self._params_filename = params_filename
+        self._output_directory = output_directory
+        self._log_filename = log_filename
         self._run_name = run_name
-        self._use_C = use_C
-        self._directory_path = Path(directory_path)
+        self._use_c = use_c
+        self._directory_path = directory_path
         self._max_count = max_count
         self._chunk_time_in_sec = chunk_time_in_sec
 
-        assert self._validate_init_params(), self._show_usage()
+        if not self._validate_init_params():
+            self.show_usage()
+            raise ValueError('Invalid initialization parameters')
 
     def validate(self):
         self._validate_init_params()
@@ -77,10 +79,11 @@ class InitParams:
                 return False
 
         if self._mode == 'stream':
+            """
             if self._directory_path == '':
                 print("directory_path cannot be empty when mode is 'stream'")
                 return False
-
+                
             if self._max_count < 1:
                 print("max_count cannot be less than 1 when mode is 'stream'")
                 return False
@@ -88,10 +91,11 @@ class InitParams:
             if self._chunk_time_in_sec < 1:
                 print("chunk_time_in_sec cannot be be less than 1 when mode is 'stream'")
                 return False
+            """
 
         """
-        if self._dark_filename == '':
-            print ('Dark filename cannot be empty')
+        if self._calibration_filename == '':
+            print ('Calibration filename cannot be empty')
             return False
         """
 
@@ -128,10 +132,10 @@ class InitParams:
         return self._image_filename
 
     @property
-    def dark_filename(self):
+    def calibration_filename(self):
         """Returns the path to the file containing calibration data
         """
-        return self._dark_filename
+        return self._calibration_filename
 
     @property
     def params_filename(self):
@@ -158,10 +162,10 @@ class InitParams:
         return self._run_name
 
     @property
-    def use_C(self):
+    def use_c(self):
         """Returns indicator showing if the optimized C implementation will be used
         """
-        return self._use_C
+        return self._use_c
 
     @property
     def directory_path(self):
@@ -181,68 +185,32 @@ class InitParams:
         """
         return self._chunk_time_in_sec
 
-    '''
-    def _show_usage(self):
-        print("Usage:\n")
-        print("ReCoDe -rc -i ARG -d ARG -p ARG -o ARG [-v ARG] [-?] [--help]")
-        print("ReCoDe -de -i ARG -o ARG [-v ARG] [-?] [--help]")
-        print("")
-        print("-rc:    Perform Reduction-Compression (Either -rc or -de must be specified)")
-        print("-de:    Perform Decompression-Expansion (Either -rc or -de must be specified)")
-        print("-i:     (Required) Image file to be compressed when using -rc and ReCoDe file to be decompressed when using -de")
-        print("-o:     (Required) Output directory")
-        print("-d:     Dark file (Required when using -rc)")
-        print("-p:     Params file (Required when using -rc)")
-        print("-v:     Verbosity level (0 or 1, Optional)")
-        print("-l:     Log file name (Optional)")
-        print("-n:     Run name (Optional). Used while logging.")
-        print("-vf:    Gap between validation frames. (Optional). If not specified no validation frames are saved.")
-        print("-h:     Displays this help (Optional)")
-        print("-help:  Displays this help (Optional)")
-        print("--help: Displays this help (Optional)")
-        print("-?:     Displays this help (Optional)")
-    '''
+    @staticmethod
+    def show_usage():
+        print("See documentation at https://github.com/NDLOHGRP/pyReCoDe for usage details")
 
-class InputParams():
+
+class InputParams:
 
     '''
     ToDo
-    1. dark_threshold_epsilon can be float; currently all inputs are assumed to be ints (see line 197)
+    1. calibration_threshold_epsilon can be float; currently all inputs are assumed to be ints (see line 197)
     2. source_bit_depth and bit_depth should be replaced with data_types to support floats
-    3. num_dark_frames and dark_frame_offset should be deprecated; ReCoDe should only accepts single frame calibration data
-    4. keep_dark_data should be renamed to append_calibration_data for clarity
+    3. num_calibration_frames and calibration_frame_offset should be deprecated; ReCoDe should only accepts single frame calibration data
+    4. keep_calibration_data should be renamed to append_calibration_data for clarity
     '''
 
     def __init__(self):
-        self._param_map = {}
-        self._param_map['reduction_level'] = -1
-        self._param_map['rc_operation_mode'] = -1
-        self._param_map['dark_threshold_epsilon'] = -1
-        self._param_map['target_bit_depth'] = -1
-        self._param_map['source_bit_depth'] = -1
-        self._param_map['num_cols'] = -1
-        self._param_map['num_rows'] = -1
-        self._param_map['num_frames'] = -1
-        self._param_map['frame_offset'] = -1
-        self._param_map['num_dark_frames'] = -1
-        self._param_map['dark_frame_offset'] = -1
-        self._param_map['keep_part_files'] = -1
-        self._param_map['num_threads'] = -1
-        self._param_map['l2_statistics'] = -1
-        self._param_map['l4_centroiding'] = -1
-        self._param_map['compression_scheme'] = -1
-        self._param_map['compression_level'] = -1
-        self._param_map['source_file_type'] = -1
-        self._param_map['source_header_length'] = -1
-        self._param_map['keep_dark_data'] = -1
-        self._param_map['dark_file_type'] = -1
-        self._param_map['dark_header_length'] = -1
-        self._param_map['source_data_type'] = -1
-        self._param_map['target_data_type'] = -1
-        # not exposed externally, to be inferred from source_data_type and source_bit_depth
-        self._param_map['source_numpy_dtype'] = -1
-        # not exposed externally, to be inferred from target_data_type and target_bit_depth
-        self._param_map['target_numpy_dtype'] = -1
+        self._param_map = {'reduction_level': -1, 'rc_operation_mode': -1, 'calibration_threshold_epsilon': -1,
+                           'target_bit_depth': -1, 'source_bit_depth': -1, 'num_cols': -1, 'num_rows': -1,
+                           'num_frames': -1, 'frame_offset': -1, 'num_calibration_frames': -1,
+                           'calibration_frame_offset': -1, 'keep_part_files': -1, 'num_threads': -1,
+                           'l2_statistics': -1, 'l4_centroiding': -1, 'compression_scheme': -1, 'compression_level': -1,
+                           'source_file_type': -1, 'source_header_length': -1, 'keep_calibration_data': -1,
+                           'calibration_file_type': -1, 'source_data_type': -1, 'target_data_type': -1,
+                           'source_numpy_dtype': -1, 'target_numpy_dtype': -1}
+        # 'source_numpy_dtype' and 'target_numpy_dtype' are not exposed externally, to be inferred from source_data_type
+        # and source_bit_depth and target_data_type and target_bit_depth
 
     def load(self, params_filename):
         assert params_filename != '', 'Params filename missing'
@@ -256,139 +224,93 @@ class InputParams():
                     assert key in self._param_map, 'Unknown parameter: ' + key
                     self._param_map[key] = int(parts[1].strip().lower())
 
-        """
-        for key in self._param_map:
-            if key == 'reduction_level':
-                self._reduction_level = self._param_map[key]
-            elif key == 'rc_operation_mode':
-                self._rc_operation_mode = self._param_map[key]
-            elif key == 'dark_threshold_epsilon':
-                self._dark_threshold_epsilon = self._param_map[key]
-            elif key == 'bit_depth':
-                self._bit_depth = self._param_map[key]
-            elif key == 'source_bit_depth':
-                self._source_bit_depth = self._param_map[key]
-            elif key == 'num_cols':
-                self._num_cols = self._param_map[key]
-            elif key == 'num_rows':
-                self._num_rows = self._param_map[key]
-            elif key == 'num_frames':
-                self._num_frames = self._param_map[key]
-            elif key == 'frame_offset':
-                self._frame_offset = self._param_map[key]
-            elif key == 'num_dark_frames':
-                self._num_dark_frames = self._param_map[key]
-            elif key == 'dark_frame_offset':
-                self._dark_frame_offset = self._param_map[key]
-            elif key == 'keep_part_files':
-                self._keep_part_files = self._param_map[key]
-            elif key == 'num_threads':
-                self._num_threads = self._param_map[key]
-            elif key == 'l2_statistics':
-                self._l2_statistics = self._param_map[key]
-            elif key == 'l4_centroiding':
-                self._l4_centroiding = self._param_map[key]
-            elif key == 'compression_scheme':
-                self._compression_scheme = self._param_map[key]
-            elif key == 'compression_level':
-                self._compression_level = self._param_map[key]
-            elif key == 'source_file_type':
-                self._source_file_type = self._param_map[key]
-            elif key == 'source_header_length':
-                self._source_header_length = self._param_map[key]
-            elif key == 'keep_dark_data':
-                self._keep_dark_data = self._param_map[key]
-            elif key == 'dark_file_type':
-                self._dark_file_type = self._param_map[key]
-            elif key == 'dark_header_length':
-                self._dark_header_length = self._param_map[key]
-        """
-
     def _validate_input_params(self):
 
         if self._param_map['reduction_level'] not in [1,2,3,4]:
-            print ('Reduction level must be 1, 2, 3 or 4')
+            print('Reduction level must be 1, 2, 3 or 4')
             return False
 
         if self._param_map['rc_operation_mode'] not in [0,1] :
-            print ('RC Operation mode can be 0, 1 or 2')
+            print('RC Operation mode can be 0, 1 or 2')
             return False
 
-        if self._param_map['dark_threshold_epsilon'] == '':
-            print ('Dark Threshold Epsilon cannot be empty')
+        if self._param_map['calibration_threshold_epsilon'] == '':
+            print('Calibration threshold (epsilon) cannot be empty')
             return False
 
         if self._param_map['source_bit_depth'] == -1 and self._param_map['source_file_type'] in [0,3]:
-            print ('Source bit depth cannot be empty when source filetype is binary/other')
+            print('Source bit depth cannot be empty when source filetype is binary/other')
             return False
 
         if self._param_map['num_cols'] == -1 and self._param_map['source_file_type'] in [0,3]:
-            print ('Number of columns cannot be empty when source filetype is binary/other')
+            print('Number of columns cannot be empty when source filetype is binary/other')
             return False
 
         if self._param_map['num_rows'] == -1 and self._param_map['source_file_type'] in [0,3]:
-            print ('Number of rows cannot be empty when source filetype is binary/other')
+            print('Number of rows cannot be empty when source filetype is binary/other')
             return False
 
         if self._param_map['num_frames'] == -1 and self._param_map['source_file_type'] in [0,3]:
-            print ('Number of frames cannot be empty when source filetype is binary/other')
+            print('Number of frames cannot be empty when source filetype is binary/other')
             return False
 
         if not isinstance(self._param_map['frame_offset'], int):
-            print ('Frame offset should be an integer')
+            print('Frame offset should be an integer')
             return False
 
-        #if self._num_dark_frames == '':
-            #print ('Number of dark frames cannot be empty')
-            #return False
+        if not isinstance(self._param_map['num_calibration_frames'], int):
+            print('Number of calibration should be an integer')
+            return False
 
-        #if self._dark_frame_offset == '':
-            #print ('Dark frame offset cannot be empty')
-            #return False
+        if not isinstance(self._param_map['calibration_frame_offset'], int):
+            print('Calibration frame offset should be an integer')
+            return False
 
         if self._param_map['keep_part_files'] not in [0,1]:
-            print ('Keep part files must be 0 or 1')
+            print('Keep part files must be 0 or 1')
             return False
 
         if not isinstance(self._param_map['num_threads'], int):
-            print ('Number of threads should be an integer')
+            print('Number of threads should be an integer')
             return False
 
         if self._param_map['l2_statistics'] not in [0,1,2]:
-            print ('L2 statistics must be 0, 1 or 2')
+            print('L2 statistics must be 0, 1 or 2')
             return False
 
         if self._param_map['l4_centroiding'] not in [0,1,2,3]:
-            print ('L4 centroiding must be 0, 1, 2 or 3')
+            print('L4 centroiding must be 0, 1, 2 or 3')
             return False
 
         if self._param_map['compression_scheme'] not in [0,1,2,3,4,5,6,7,8,9,10,11]:
-            print ('Compression scheme must be 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or 11')
+            print('Compression scheme must be 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 or 11')
             return False
 
         if int(self._param_map['compression_level']) < 0 or int(self._param_map['compression_level']) > 22:
-            print ('Compression level can be from 0 - 22')
+            print('Compression level can be from 0 - 22')
             return False
 
-        if self._param_map['keep_dark_data'] not in [0,1]:
-            print ('Keep dark data cannot be either 0 or 1')
+        if self._param_map['keep_calibration_data'] not in [0,1]:
+            print('Keep dark data cannot be either 0 or 1')
             return False
 
         if self._param_map['source_file_type'] not in [0,1,2,3]:
-            print ('Source file type must be 0, 1, 2 or 3')
+            print('Source file type must be 0, 1, 2 or 3')
             return False
 
         if self._param_map['source_file_type'] in [0,3] and (self._param_map['source_header_length'] == -1 or not isinstance(self._param_map['source_header_length'], int)):
-            print ('Source Header Length cannot be empty or non-integer when source filetype is binary/other')
+            print('Source Header Length cannot be empty or non-integer when source filetype is binary/other')
             return False
 
-        if self._param_map['dark_file_type'] not in [0,1,2,3]:
-            print ('Dark filetype must be 0, 1, 2 or 3')
+        if self._param_map['calibration_file_type'] not in [0,1,2,3]:
+            print('Calibration filetype must be 0, 1, 2 or 3')
             return False
 
-        if self._param_map['dark_file_type'] in [0,3] and (self._param_map['dark_header_length'] == -1 or not isinstance(self._param_map['dark_header_length'], int)):
-            print ('Dark Header Length cannot be empty or non-integer when dark filetype is binary/other')
+        '''
+        if self._param_map['calibration_file_type'] in [0,3] and (self._param_map['dark_header_length'] == -1 or not isinstance(self._param_map['dark_header_length'], int)):
+            print('Dark Header Length cannot be empty or non-integer when dark filetype is binary/other')
             return False
+        '''
 
         if self._param_map['frame_offset'] < 0:
             self._param_map['frame_offset'] = 0
@@ -397,11 +319,11 @@ class InputParams():
             self._param_map['num_threads'] = 1
 
         if self._param_map['source_data_type'] not in [0,1,2]:
-            print ('Source data type must be 0, 1, or 2')
+            print('Source data type must be 0, 1, or 2')
             return False
 
         if self._param_map['target_data_type'] not in [0,1,2]:
-            print ('Target data type must be 0, 1, or 2')
+            print('Target data type must be 0, 1, or 2')
             return False
 
         if self._param_map['target_bit_depth'] == -1:
@@ -440,10 +362,10 @@ class InputParams():
         return self._param_map['rc_operation_mode']
 
     @property
-    def dark_threshold_epsilon(self):
+    def calibration_threshold_epsilon(self):
         """Returns the dark threshold epsilon
         """
-        return self._param_map['dark_threshold_epsilon']
+        return self._param_map['calibration_threshold_epsilon']
 
     @property
     def target_bit_depth(self):
@@ -500,16 +422,16 @@ class InputParams():
         return self._param_map['frame_offset']
 
     @property
-    def num_dark_frames(self):
+    def num_calibration_frames(self):
         """Returns number of dark frames
         """
-        return self._param_map['num_dark_frames']
+        return self._param_map['num_calibration_frames']
 
     @property
-    def dark_frame_offset(self):
+    def calibration_frame_offset(self):
         """Returns dark frame offset
         """
-        return self._param_map['dark_frame_offset']
+        return self._param_map['calibration_frame_offset']
 
     @property
     def keep_part_files(self):
@@ -560,10 +482,10 @@ class InputParams():
         return self._param_map['compression_level']
 
     @property
-    def keep_dark_data(self):
-        """Returns nkeep dark data
+    def keep_calibration_data(self):
+        """Returns indicator showing if calibration data is retained
         """
-        return self._param_map['keep_dark_data']
+        return self._param_map['keep_calibration_data']
 
     @property
     def source_file_type(self):
@@ -578,16 +500,18 @@ class InputParams():
         return self._param_map['source_header_length']
 
     @property
-    def dark_file_type(self):
-        """Returns dark file type
+    def calibration_file_type(self):
+        """Returns calibration file type
         """
-        return self._param_map['dark_file_type']
+        return self._param_map['calibration_file_type']
 
+    '''
     @property
     def dark_header_length(self):
         """Returns dark header length
         """
         return self._param_map['dark_header_length']
+    '''
 
     @property
     def source_data_type(self):

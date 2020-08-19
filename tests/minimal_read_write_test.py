@@ -1,5 +1,5 @@
 from pyrecode.recode_writer import ReCoDeWriter, print_run_metrics
-from pyrecode.recode_reader import ReCoDeReader
+from pyrecode.recode_reader import ReCoDeReader, merge_parts
 from pyrecode.params import InputParams
 import numpy as np
 
@@ -42,14 +42,35 @@ if __name__ == "__main__":
     print("-----------")
     print_run_metrics(run_metrics)
 
-    """Read"""
-    print("\n=========")
-    print("Read Test")
-    print("=========\n")
+    """Read and Validate Intermediate Files"""
+    print("\n===========================")
+    print("Read Test: Intermediate Files")
+    print("===========================\n")
 
     intermediate_file_name = '../scratch/test_data.rc1_part000'
 
     reader = ReCoDeReader(intermediate_file_name, is_intermediate=True)
+    reader.open()
+    test_passed = True
+    for i in range(3):
+        frame_data = reader.get_next_frame()
+        if np.sum(_data[i, :, :] - frame_data[i]['data'].todense()) > 0:
+            test_passed = False
+    reader.close()
+
+    """Merge intermediate files"""
+    print("\n========================")
+    print("Merge Intermediate Files ")
+    print("========================\n")
+    merge_parts('../scratch', 'test_data.rc1', 1)
+
+    """Read and Validate Merged Data"""
+    print("\n======================")
+    print("Read Test: ReCoDe File ")
+    print("======================\n")
+
+    recode_file_name = '../scratch/test_data.rc1'
+    reader = ReCoDeReader(recode_file_name, is_intermediate=False)
     reader.open()
     test_passed = True
     for i in range(3):

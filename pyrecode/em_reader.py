@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 import numpy as np
 from .misc import rc_cfg as rc
@@ -236,7 +237,7 @@ class MRCReader(EMReaderBase):
         self._file_handle.close()
 
     def serialize_header(self, fp):
-        fp.write(self._file_handle.header, 1024)
+        fp.write(self._file_handle.header)
 
 
 class SEQReader(EMReaderBase):
@@ -251,7 +252,6 @@ class SEQReader(EMReaderBase):
         EMReaderBase.__init__(self, file, 'seq', False, buffer_size)
         
     def _open(self):
-        print(self._source_filename)
         self._stack = self._pims.open(self._source_filename)
         self._is_open = True
         
@@ -297,7 +297,10 @@ class SEQReader(EMReaderBase):
         return
 
     def serialize_header(self, fp):
-        fp.write(self._file_handle.header, 1024)
+        # s = json.dumps(self._stack.header)
+        # binary = ' '.join(format(ord(letter), 'b') for letter in s)
+        binary = np.zeros(1024, dtype=np.uint8).tobytes()
+        fp.write(binary[:1024])
 
 
 if __name__ == "__main__":
