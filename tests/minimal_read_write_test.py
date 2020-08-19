@@ -54,8 +54,9 @@ if __name__ == "__main__":
     test_passed = True
     for i in range(3):
         frame_data = reader.get_next_frame()
-        if np.sum(_data[i, :, :] - frame_data[i]['data'].todense()) > 0:
-            test_passed = False
+        if frame_data is not None:
+            if np.sum(_data[i, :, :] - frame_data[i]['data'].todense()) > 0:
+                test_passed = False
     reader.close()
 
     """Merge intermediate files"""
@@ -75,8 +76,9 @@ if __name__ == "__main__":
     test_passed = True
     for i in range(3):
         frame_data = reader.get_next_frame()
-        if np.sum(_data[i, :, :] - frame_data[i]['data'].todense()) > 0:
-            test_passed = False
+        if frame_data is not None:
+            if np.sum(_data[i, :, :] - frame_data[i]['data'].todense()) > 0:
+                test_passed = False
     reader.close()
 
     if test_passed:
