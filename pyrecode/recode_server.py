@@ -162,7 +162,7 @@ class NodeClient:
         if self._is_connected:
             return
         try:
-            self._server_socket = self._node_token.context.socket(zmq.REQ)
+            self._server_socket = zmq.Context().socket(zmq.REQ)
             self._server_socket.connect(self._node_token.ip_address + ":" + str(self._node_token.server_port))
             self._is_connected = True
         except:
@@ -171,7 +171,7 @@ class NodeClient:
 
     def subscribe(self):
         try:
-            self._sub_socket = self._node_token.context.socket(zmq.SUB)
+            self._sub_socket = zmq.Context().socket(zmq.SUB)
             self._sub_socket.connect(self._node_token.ip_address + ":" + str(self._node_token.publishing_port))
         except:
             print('Unable to connect to node')
@@ -216,7 +216,7 @@ class Logger:
     def start(self, session_id, state, verbosity, run_name, filename=None):
         self._session_id = session_id
         self._state = state
-        self._socket = self._node_token.context.socket(zmq.PULL)
+        self._socket = zmq.Context().socket(zmq.PULL)
         self._socket.bind(self._node_token.ip_address + ":" + str(self._node_token.publishing_port))
         self._state[0] = rc.STATUS_CODE_AVAILABLE
         self._verbosity = verbosity
@@ -292,7 +292,7 @@ class Logger:
                         timestamp = key[:key.find("_")]
                         f.write(self._format_msg(timestamp, md[key]))
                         f.write("\n")
-
+                        
 
 class ReCoDeServer:
 
@@ -347,7 +347,7 @@ class ReCoDeServer:
         self._node_token = NodeToken(8514, self._context, 'tcp://127.0.0.1', 18534, 28534)
 
         for i in range(self._num_threads):
-            token = NodeToken(i, self._context, 'tcp://127.0.0.1', 18534 + i, 28534)
+            token = NodeToken(i, None, 'tcp://127.0.0.1', 18534 + i, 28534)
             node = NodeClient(token)
             node_clients.append(node)
             self._node_states[token.node_id] = rc.STATUS_CODE_NOT_READY
@@ -363,7 +363,7 @@ class ReCoDeServer:
         time.sleep(0.1)
 
         # start logger
-        token = NodeToken(-1, self._context, 'tcp://127.0.0.1', -1, 28534)
+        token = NodeToken(-1, None, 'tcp://127.0.0.1', -1, 28534)
         logger = Logger(token)
         self._logger_state = {0: rc.STATUS_CODE_NOT_READY}
         logger_process = Process(target=logger.start, args=(self._session_id, self._logger_state,
