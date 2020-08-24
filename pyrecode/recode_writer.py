@@ -149,6 +149,10 @@ class ReCoDeWriter:
         self._num_frames_in_part = None
         self._n_bytes_in_binary_image = None
 
+        # variable used to ensure source header is serialized only once, even though
+        # _do_sanity_check is called once for each chunk
+        self._is_first_chunk = True
+
         # variables used for counting on validation frames
         self._vc_struct = nd.generate_binary_structure(2, 2)
         self._vc_dose_rate = 0.0
@@ -230,7 +234,7 @@ class ReCoDeWriter:
         self._vc_roi['y_start'] = math.floor((self._header['ny'] - self._vc_roi['ny']) / 2.0)
         self._vc_n_pixels = self._vc_roi['nx'] * self._vc_roi['ny']
 
-    def _do_sanity_checks(self, data=None):
+    def _do_sanity_checks(self, is_first_chunk, data=None):
         """
         Source data is now available. Validate if input params agree with data. 
         This function is called separately for each chunk by each thread.
@@ -253,7 +257,9 @@ class ReCoDeWriter:
                 raise NotImplementedError("No implementation available for loading calibration file of type 'Other'")
 
             # serialize source header
-            self._source.serialize_header(self._intermediate_file)
+            if self._is_first_chunk:
+                self._source.serialize_header(self._intermediate_file)
+
         else:
             self._source = data
             self._source_shape = self._source.shape
@@ -285,35 +291,53 @@ class ReCoDeWriter:
         run_metrics = {}
 
         # do sanity checks
-        self._do_sanity_checks(data)
+        self._do_sanity_checks(self._is_first_chunk, data)
+
+        # buffer should be initialized to 0 only the first time run() is called
+        if self._is_first_chunk:
+            self._rct_buffer_fill_position = 0
+            self._available_buffer_space = self._buffer_sz
+
+        # turn off first chunkiness (this could be done later)
+        if self._is_first_chunk:
+            self._is_first_chunk = False
 
         # determine the number of available frames for this thread
         # this is probably should be done by the caller and passed as params frame_offset and available_frames
         if self._init_params.mode == 'batch':
-            # batch and stream modes use slightly different calculations when computing frame_offset
-            # in batch mode ReCoDe nodes are numbered from 0, in stream mode ReCoDe nodes are numbered from 1
-            # as the recode_server node is 0
             n_frames_in_chunk = self._input_params.nz
-            n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
-            frame_offset = self._node_id * n_frames_per_thread
-            available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
-
         elif self._init_params.mode == 'stream':
             n_frames_in_chunk = self._source_shape[0]
-            n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
-            frame_offset = (self._node_id - 1) * n_frames_per_thread
-            available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
-
         else:
             raise ValueError("Invalid input params: mode. Can be 'batch' or 'stream'.")
 
-        print(frame_offset, available_frames)
+        n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
+        frame_offset = self._node_id * n_frames_per_thread
+        available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
 
         # read the thread-specific data from chunk into memory
         stt = datetime.now()
+
         if data is None:
             with emfile(self._init_params.image_filename, self._input_params.source_file_type, mode="r") as f:
-                data = f[frame_offset:frame_offset + available_frames]
+                try:
+                    # try to load the expected frames all at once. The no. of expected frames is based on the header,
+                    # which may not be accurate. This will result in an index out of range exception
+                    data = f[frame_offset:frame_offset + available_frames]
+                except IndexError as e1:
+                    # in case of index out of range exception, try to load one frame at a time
+                    count = 0
+                    frame_list = []
+                    a = 1
+                    while a is not None and count < available_frames:
+                        try:
+                            a = f[frame_offset + count]
+                            frame_list.append(np.squeeze(a))
+                            count += 1
+                        except IndexError as e2:
+                            a = None
+                    data = np.asarray(frame_list)
+                    available_frames = data.shape[0]
         else:
             data = data[frame_offset:frame_offset + available_frames]
 
@@ -348,15 +372,11 @@ class ReCoDeWriter:
         # process frames
         run_start = datetime.now()
 
-        self._rct_buffer_fill_position = 0
-        self._available_buffer_space = self._buffer_sz
-
         for count, frame in enumerate(data):
 
             absolute_frame_index = self._chunk_offset + frame_offset + count
             compressed_frame_length, _metrics, binary_frame = self._reduce_compress(frame, absolute_frame_index,
                                                                                     _statistics, _centroiding_scheme)
-
             # if buffer doesn't have enough space to hold new data offload buffer data to file
             if self._available_buffer_space < compressed_frame_length:
                 self._offload_buffer()
@@ -396,7 +416,7 @@ class ReCoDeWriter:
         self._num_frames_in_part += available_frames
 
         run_metrics['run_time'] = datetime.now() - run_start
-        run_metrics['run_frames'] = n_frames_in_chunk
+        run_metrics['run_frames'] = available_frames
         return run_metrics
 
     def _reduce_compress(self, frame, absolute_frame_index, _statistics=None, _centroiding_scheme=None):

@@ -278,12 +278,17 @@ class ReCoDeHeader:
         rc_fp.seek(self._rc_header_length)
         return rc_fp
 
-    def get_frame_data_offset(self):
+    def get_frame_data_offset(self, is_intermediate, sz_frame_metadata):
         if self._rc_header['version_major'] == 0 and self._rc_header['version_minor'] == 1:
-            return self._rc_header_length
+            offset = self._rc_header_length
         else:
-            return self._rc_header_length + self._rc_header['source_header_length'] \
-                   + len(self._non_standard_frame_metadata_sizes)*100
+            offset = self._rc_header_length + self._rc_header['source_header_length'] \
+                     + len(self._non_standard_frame_metadata_sizes) * 100
+
+        if is_intermediate:
+            return offset
+        else:
+            return int(offset + self._rc_header['nz'] * sz_frame_metadata)
 
     @property
     def source_header(self):

@@ -4,9 +4,12 @@ import zmq
 import time
 import json
 import os
+import sys
+import traceback
 from os.path import isfile, join
 from pathlib import Path
 import queue
+from collections import deque
 from datetime import datetime
 import argparse
 from .params import InitParams, InputParams
@@ -202,16 +205,23 @@ class Logger:
     def __init__(self, token):
         self._node_token = token
         self._socket = None
-        self._logs = {}
+        # self._logs = {}
+        self._logs = deque([])
         self._state = None
         self._session_id = None
+        self._verbosity = 0
+        self._filename = None
+        self._run_name = None
 
-    def start(self, session_id, state):
+    def start(self, session_id, state, verbosity, run_name, filename=None):
         self._session_id = session_id
         self._state = state
         self._socket = self._node_token.context.socket(zmq.PULL)
         self._socket.bind(self._node_token.ip_address + ":" + str(self._node_token.publishing_port))
         self._state[0] = rc.STATUS_CODE_AVAILABLE
+        self._verbosity = verbosity
+        self._run_name = run_name
+        self._filename = filename
         self.run()
 
     def run(self):
@@ -239,16 +249,21 @@ class Logger:
         else:
             timestamp = datetime.now().strftime("%m/%d/%Y-%H:%M:%S")
         key = timestamp + '_' + str(md.session_id) + '_' + str(md.source_process_id) + '_' + str(md.type)
-        self._logs[key] = md
+        # self._logs[key] = md
+        self._logs.append({key: md})
         self._print_msg(timestamp, md)
 
+    def _print_msg(self, timestamp, md):
+        formatted_msg = self._format_msg(timestamp, md)
+        print(formatted_msg)
+
     @staticmethod
-    def _print_msg(timestamp, md):
+    def _format_msg(timestamp, md):
 
         if md.source_process_id is not None and md.source_process_id != '':
             if md.source_process_id == -1:
                 src = 'Logger'
-            elif md.source_process_id == 0:
+            elif md.source_process_id == 8514:
                 src = 'Head Node'
             else:
                 src = 'Node ' + str(md.source_process_id)
@@ -257,11 +272,26 @@ class Logger:
 
         typ = rc.MESSAGE_TYPE_INFORMAL_DESC[md.type]
 
-        print('(' + typ + ')', timestamp, src + ':', md.message, md.descriptive_message,
-              '[Session ID:', str(md.session_id) + ']')
+        formatted_msg = '(' + str(typ) + ')' + ' ' + str(timestamp) + ' ' + str(src) + ' : ' + md.message + ' ' + \
+                        md.descriptive_message + ' [Session ID:' + str(md.session_id) + ']'
+
+        return formatted_msg
 
     def _shutdown(self):
+
         self._socket.close()
+
+        if self._filename is not None and self._filename != '':
+            with open(self._filename, "w") as f:
+                f.write("\n")
+                f.write("Run name: " + self._run_name + " (Session Id: " + str(self._session_id) + ")" + "\n")
+                f.write("======================================================\n")
+                while len(self._logs) > 0:
+                    md = self._logs.popleft()
+                    for key in md:
+                        timestamp = key[:key.find("_")]
+                        f.write(self._format_msg(timestamp, md[key]))
+                        f.write("\n")
 
 
 class ReCoDeServer:
@@ -285,7 +315,7 @@ class ReCoDeServer:
         self._max_attempts = 10
         self._max_non_responsive_time = 15
 
-    def run(self, init_params, input_params=None):
+    def run(self, init_params, input_params=None, dark_data=None, data=None):
 
         self._init_params = init_params
 
@@ -295,6 +325,11 @@ class ReCoDeServer:
             self._input_params.load(Path(self._init_params.params_filename))
         else:
             self._input_params = input_params
+
+        if self._init_params.mode == 'stream':
+            _data = None
+        elif self._init_params.mode == 'batch':
+            _data = data
 
         self._num_threads = self._input_params.num_threads
 
@@ -308,9 +343,10 @@ class ReCoDeServer:
         nodes = []
         node_clients = []
 
-        self._node_token = NodeToken(0, self._context, 'tcp://127.0.0.1', 18534, 28534)
+        # 8514 = HEAD
+        self._node_token = NodeToken(8514, self._context, 'tcp://127.0.0.1', 18534, 28534)
 
-        for i in range(1, self._num_threads + 1):
+        for i in range(self._num_threads):
             token = NodeToken(i, self._context, 'tcp://127.0.0.1', 18534 + i, 28534)
             node = NodeClient(token)
             node_clients.append(node)
@@ -319,7 +355,8 @@ class ReCoDeServer:
             rct = ReCoDeNode(token, self._init_params, self._input_params)
             p = Process(target=rct.run,
                         args=(self._session_id, token,
-                              self._node_states, self._node_state_update_timestamps, self._logger_state))
+                              self._node_states, self._node_state_update_timestamps, self._logger_state,
+                              dark_data, self._input_params, data))
             nodes.append(p)
             p.start()
 
@@ -329,7 +366,9 @@ class ReCoDeServer:
         token = NodeToken(-1, self._context, 'tcp://127.0.0.1', -1, 28534)
         logger = Logger(token)
         self._logger_state = {0: rc.STATUS_CODE_NOT_READY}
-        logger_process = Process(target=logger.start, args=(self._session_id, self._logger_state))
+        logger_process = Process(target=logger.start, args=(self._session_id, self._logger_state,
+                                                            self._init_params.verbosity, self._init_params.run_name,
+                                                            self._init_params.log_filename))
         logger_process.start()
 
         time.sleep(0.1)
@@ -415,7 +454,7 @@ class ReCoDeServer:
 
     def _log(self, severity, text, descriptive_text=''):
         m = MessageData(self._session_id, severity, text,
-                        descriptive_message=descriptive_text, source_process_id=0,
+                        descriptive_message=descriptive_text, source_process_id=self._node_token.node_id,
                         mapped_data={'timestamp': datetime.now().strftime('%m/%d/%Y-%H:%M:%S')}).to_json()
         self._pub_socket.send_json(m)
 
@@ -554,7 +593,8 @@ class ReCoDeNode:
                         mapped_data={'timestamp': datetime.now().strftime('%m/%d/%Y-%H:%M:%S')}).to_json()
         self._pub_socket.send_json(m)
 
-    def run(self, session_id, token, node_states, node_state_update_timestamps, logger_state):
+    def run(self, session_id, token, node_states, node_state_update_timestamps, logger_state,
+            dark_data=None, input_params=None, data=None):
 
         self._node_token = token
         self._node_states = node_states
@@ -594,21 +634,25 @@ class ReCoDeNode:
                         self._send_ack(md)
                         self._set_state(rc.STATUS_CODE_BUSY)
                         try:
-                            self._open()
+                            self._open(dark_data=dark_data, input_params=input_params)
                             self._start()
                             self._set_state(rc.STATUS_CODE_AVAILABLE)
                         except Exception as e:
-                            print(e)
+                            self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Exception",
+                                      descriptive_text=traceback.format_exc())
+                            traceback.print_tb(e.__traceback__)
                             self._set_state(rc.STATUS_CODE_ERROR)
 
                     elif md.message == 'process_file':
                         self._send_ack(md)
                         self._set_state(rc.STATUS_CODE_BUSY)
                         try:
-                            self._process_file()
+                            self._process_file(data=data)
                             self._set_state(rc.STATUS_CODE_AVAILABLE)
                         except Exception as e:
-                            print(e)
+                            self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Exception",
+                                      descriptive_text=traceback.format_exc())
+                            traceback.print_tb(e.__traceback__)
                             self._set_state(rc.STATUS_CODE_ERROR)
 
                     elif md.message == 'close':
@@ -618,7 +662,9 @@ class ReCoDeNode:
                             self._set_state(rc.STATUS_CODE_IS_CLOSED)
                             return
                         except Exception as e:
-                            print(e)
+                            self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Exception",
+                                      descriptive_text=traceback.format_exc())
+                            traceback.print_tb(e.__traceback__)
                             self._set_state(rc.STATUS_CODE_ERROR)
                             return
 
@@ -633,16 +679,21 @@ class ReCoDeNode:
         ).to_json()
         self._socket.send_json(m)
 
-    def _open(self):
+    def _open(self, dark_data=None, input_params=None):
         # create ReCoDeWriter depending on mode, if mode is stream image_filename is path_to_ramdisk\Next_Stream.seq
         # load calibration data
-        self._recode_writer = ReCoDeWriter(image_filename=os.path.join(self._init_params.directory_path, "Next_Stream.seq"),
-                                           dark_data=None,
+        if self._init_params.mode == "stream":
+            _image_filename = os.path.join(self._init_params.directory_path, "Next_Stream.seq")
+        elif self._init_params.mode == "batch":
+            _image_filename = self._init_params.image_filename
+
+        self._recode_writer = ReCoDeWriter(image_filename=_image_filename,
+                                           dark_data=dark_data,
                                            dark_filename=self._init_params.calibration_filename,
                                            output_directory=self._init_params.output_directory,
-                                           input_params=None,
+                                           input_params=input_params,
                                            params_filename=self._init_params.params_filename,
-                                           mode='stream',
+                                           mode=self._init_params.mode,
                                            validation_frame_gap=self._init_params.validation_frame_gap,
                                            log_filename=self._init_params.log_filename,
                                            run_name=self._init_params.run_name,
@@ -659,16 +710,17 @@ class ReCoDeNode:
         # allocate internal buffers
         self._recode_writer.start()
 
-    def _process_file(self):
+    def _process_file(self, data=None):
         # read source frames
         # reduce-compress and serialize to destination
-        self._recode_writer.run()
-        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processed 10 frames')
+        run_metrics = self._recode_writer.run(data=data)
+        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processed ' + str(run_metrics['run_frames']) + ' frames')
         # at the end of each run, update q with the frame_ids processed
         return
 
     def _close(self, node_states):
         # update recode header with true frame count, flush remaining data and close file
+        self._recode_writer.close()
         self._socket.close()
         return
 
@@ -677,7 +729,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='ReCoDe Server')
     parser.add_argument('--source', dest='source', action='store', default='',
-                        help='if mode is batch then file to be processed, otherwise path to folder containing data (typically inside RAM disk for on-the-fly)')
+                        help='if mode is batch then file to be processed, otherwise path to folder containing data '
+                             '(typically inside RAM disk for on-the-fly)')
     parser.add_argument('--calibration_file', dest='calibration_file', action='store', default='',
                         help='path to calibration file')
     parser.add_argument('--out_dir', dest='out_dir', action='store', default='', help='output directory')

@@ -2,6 +2,7 @@ from pyrecode.recode_server import ReCoDeServer
 from pyrecode.params import InitParams
 import argparse
 
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='ReCoDe Server')

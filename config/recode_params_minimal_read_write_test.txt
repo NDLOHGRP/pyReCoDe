@@ -1,6 +1,6 @@
 l4_centroiding = 0
 source_file_type = 0
-num_frames = 3
+num_frames = 9
 source_header_length = 0
 calibration_frame_offset = 0
 compression_scheme = 0
@@ -9,7 +9,7 @@ compression_level = 1
 l2_statistics = 0
 calibration_threshold_epsilon = 0
 frame_offset = 0
-num_threads = 1
+num_threads = 3
 rc_operation_mode = 1
 num_calibration_frames = 1
 reduction_level = 1
