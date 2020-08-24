@@ -293,6 +293,7 @@ class SEQReader(EMReaderBase):
             raise TypeError    
     
     def close(self):
+        self._stack.close()
         self._is_open = False
         return
 
