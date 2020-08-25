@@ -16,11 +16,19 @@ if __name__ == "__main__":
     _shape = (9, 512, 512)
     _tag = 'minimal_read_write_test'
 
-    _data = np.random.randint(0, high=4096, size=_shape).astype(_dtype)
+    # create mock data
+    _data = np.random.randint(0, high=4096, size=_shape)
+
+    # make data sparse
+    _data = _data - 3500
+    _data[_data < 0] = 0
+    _data = _data.astype(_dtype)
+
+    # create mock calibration data
     calib_frame = np.zeros((_shape[1], _shape[2]), dtype=_dtype)
 
     init_params = InitParams('batch', '../scratch', image_filename='test_data',
-                             validation_frame_gap=-1, log_filename='../scratch/recode.log',
+                             validation_frame_gap=2, log_filename='../scratch/recode.log',
                              run_name=_tag, verbosity=0, use_c=False)
 
     _input_params = InputParams()

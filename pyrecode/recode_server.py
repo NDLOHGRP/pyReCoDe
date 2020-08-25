@@ -618,10 +618,12 @@ class ReCoDeNode:
         except Exception as e:
             self._set_state(rc.STATUS_CODE_ERROR)
             print('Node:', self._node_token.node_id, '=>', 'Exception:', e)
+            self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Exception",
+                      descriptive_text=traceback.format_exc())
+            traceback.print_tb(e.__traceback__)
             return
 
         while True:
-            print('Node', self._pid, 'Waiting...')
             self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Node ' + str(self._pid) + ' Waiting...')
             s = self._socket.recv_json()
             md = MessageData('', 0).from_json(s)
@@ -708,6 +710,7 @@ class ReCoDeNode:
         # create output rc part file
         # serialize header(s) to part file
         # allocate internal buffers
+        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processing...')
         self._recode_writer.start()
 
     def _process_file(self, data=None):
@@ -715,6 +718,9 @@ class ReCoDeNode:
         # reduce-compress and serialize to destination
         run_metrics = self._recode_writer.run(data=data)
         self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processed ' + str(run_metrics['run_frames']) + ' frames')
+        if 'run_dose_rates' in run_metrics:
+            self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Estimated dose rate = ' + str(run_metrics['run_dose_rates'][-1]))
+
         # at the end of each run, update q with the frame_ids processed
         return
 
@@ -722,6 +728,7 @@ class ReCoDeNode:
         # update recode header with true frame count, flush remaining data and close file
         self._recode_writer.close()
         self._socket.close()
+        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Clean shutdown')
         return
 
 
