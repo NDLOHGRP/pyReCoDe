@@ -3,6 +3,7 @@ from scipy.sparse import coo_matrix
 import scipy.ndimage as nd
 from numba import jit
 from datetime import datetime
+import copy
 
 """
 To Dos for recalibrate_l1 and l1_to_l4_converter:
@@ -12,7 +13,7 @@ To Dos for recalibrate_l1 and l1_to_l4_converter:
 
 
 def recalibrate_l1(l1_frames, n_frames=-1, original_calibration_frame=None, new_calibration_frame=None,
-                   epsilon=0.0):
+                   epsilon=0.0, in_place=False):
 
     if n_frames < 1:
         n_frames = len(l1_frames)
@@ -41,7 +42,11 @@ def recalibrate_l1(l1_frames, n_frames=-1, original_calibration_frame=None, new_
         frame[frame < _min] = _min
         frame[frame > _max] = _max
         frame = frame.astype(dtype)
-        l1_re_calibrated[key] = l1_frames[key]
+
+        if in_place:
+            l1_re_calibrated[key] = l1_frames[key]
+        else:
+            _deep_copy_frame_metadata(l1_frames, l1_re_calibrated, key)
         l1_re_calibrated[key]['data'] = coo_matrix(frame, dtype=frame.dtype)
 
         if n_frames > 0 and n_frames == frame_count:
@@ -51,7 +56,8 @@ def recalibrate_l1(l1_frames, n_frames=-1, original_calibration_frame=None, new_
     return l1_re_calibrated
 
 
-def l1_to_l4_converter(l1_frames, frame_shape, n_frames=-1, area_threshold=0, verbosity=0, method='weighted_average'):
+def l1_to_l4_converter(l1_frames, frame_shape, n_frames=-1, area_threshold=0, verbosity=0, method='weighted_average',
+                       in_place=False):
 
     # get data type for centroids
     max_dim = np.max(frame_shape)
@@ -84,7 +90,12 @@ def l1_to_l4_converter(l1_frames, frame_shape, n_frames=-1, area_threshold=0, ve
         centroids = get_centroids_2D_nb(labeled_foreground, dark_subtracted_binary, frame, area_threshold, method)
         tc = datetime.now() - sc
         centroids = (np.round(centroids)).astype(_centroids_dtype)
-        cd[key] = l1_frames[key]
+
+        if in_place:
+            cd[key] = l1_frames[key]
+        else:
+            _deep_copy_frame_metadata(l1_frames, cd, key)
+
         if len(centroids) > 0:
             cd[key]['data'] = coo_matrix((t[:len(centroids)], (centroids[:, 1], centroids[:, 0])),
                                          shape=(frame_shape[0], frame_shape[1]), dtype=np.bool)
@@ -112,6 +123,13 @@ def l1_to_l4_converter(l1_frames, frame_shape, n_frames=-1, area_threshold=0, ve
     return cd
 
 
+def _deep_copy_frame_metadata(src, target, frame_id):
+    target[frame_id] = {}
+    for key in src[frame_id]:
+        if key is not 'data':
+            target[frame_id][key] = copy.deepcopy(src[frame_id][key])
+
+
 def _get_centroids_2d(labelled_image, b_frame, frame):
     
     n_cols = b_frame.shape[1]
@@ -129,7 +147,7 @@ def _get_centroids_2d(labelled_image, b_frame, frame):
             centroids[L] = {'x':v*p[0], 'y':v*p[1], 'w':v}
             
     centroid_arr = np.zeros((len(centroids),2))
-    for i,c in enumerate(centroids):
+    for i, c in enumerate(centroids):
         centroid_arr[i,0] = centroids[c]['x'] / centroids[c]['w']
         centroid_arr[i,1] = centroids[c]['y'] / centroids[c]['w']
 
