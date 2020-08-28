@@ -1,3 +1,4 @@
+import sys
 from setuptools import setup, Extension, find_packages
 
 module1 = Extension('c_recode',
@@ -5,7 +6,7 @@ module1 = Extension('c_recode',
                                    ('MINOR_VERSION', '1')],
                     include_dirs=['pyrecode/c_extensions'],
                     sources=['pyrecode/pyrecode.cpp'],
-                    extra_compile_args=["-O3"])
+                    extra_compile_args=["-O3"] + (["/O2"] if sys.platform.startswith("win") else []))
 
 setup(name='pyrecode',
       version='0.1',

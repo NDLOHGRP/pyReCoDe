@@ -86,10 +86,10 @@ def _get_fit_params(d, nFrames, n_stats_frames, nx, ny, _m):
 
 def make_calibration_frames(filepath, dtype, nFrames, n_stats_frames, n_sigmas, savepath='', filename_prefix='',
                             use_acc=False, sigma_acc=-1):
-							
+
     _filepath = str(Path(filepath))
     _savepath = str(Path(savepath))
-	
+
     if not filename_prefix.endswith('_'):
         filename_prefix += '_'
 

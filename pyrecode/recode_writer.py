@@ -111,7 +111,11 @@ class ReCoDeWriter:
                               self._input_params.source_numpy_dtype)
             else:
                 raise NotImplementedError("No implementation available for loading calibration file of type 'Other'")
-            t = np.squeeze(_t[0])
+            	
+            if _t.ndim > 2:
+                t = np.squeeze(_t[0])
+            else:
+                t = _t
         else:
             t = dark_data
 
@@ -280,7 +284,7 @@ class ReCoDeWriter:
                 self._header['nz'] = self._input_params.num_frames
 
         # close source file to reduce read overhead
-        if self._input_params.calibration_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
+        if self._input_params.source_file_type in [rc.FILE_TYPE_MRC, rc.FILE_TYPE_SEQ]:
             self._source.close()
 
     def run(self, data=None):
@@ -313,7 +317,8 @@ class ReCoDeWriter:
 
         n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
         frame_offset = self._node_id * n_frames_per_thread
-        available_frames = min(n_frames_per_thread, n_frames_in_chunk - frame_offset)
+        available_frames = min(n_frames_per_thread, max(n_frames_in_chunk - frame_offset, 0))
+        # print(n_frames_in_chunk, n_frames_per_thread, self._node_id, available_frames, frame_offset)
 
         # read the thread-specific data from chunk into memory
         stt = datetime.now()

@@ -484,7 +484,8 @@ class ReCoDeServer:
                     queued_files[f] = 1
                     has_new_file = True
 
-            if has_new_file and q.qsize() > 1:
+            # if has_new_file and q.qsize() > 1:
+            if q.qsize() > 1:
 
                 fname = q.get()
 
@@ -515,7 +516,7 @@ class ReCoDeServer:
                     wait_time = (datetime.now() - st).total_seconds()
 
                 elapsed_time = time.time() - start_time
-                print("Monitor Thread: Processed in " + str(elapsed_time) + " seconds.")
+                self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Processed chunk in " + str(elapsed_time) + " seconds.")
                 count += 1
 
                 # Delete
@@ -557,7 +558,7 @@ class ReCoDeServer:
             wait_time = (datetime.now() - st).total_seconds()
 
         elapsed_time = time.time() - start_time
-        print("Monitor Thread: Processed in " + str(elapsed_time) + " seconds.")
+        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, "Processed chunk in " + str(elapsed_time) + " seconds.")
         count += 1
 
 
@@ -717,7 +718,7 @@ class ReCoDeNode:
         # read source frames
         # reduce-compress and serialize to destination
         run_metrics = self._recode_writer.run(data=data)
-        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processed ' + str(run_metrics['run_frames']) + ' frames')
+        self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Processed ' + str(run_metrics['run_frames']) + ' frames in ' + str(run_metrics['run_time']))
         if 'run_dose_rates' in run_metrics:
             self._log(rc.MESSAGE_TYPE_INFO_RESPONSE, 'Estimated dose rate = ' + str(run_metrics['run_dose_rates'][-1]))
 
