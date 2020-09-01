@@ -274,6 +274,9 @@ class ReCoDeReader:
 
     def get_next_frame_raw(self, read_data=True):
 
+        if not read_data:
+            empty_array = np.array(0)
+
         if self._current_frame_index == 0:
             self._fp.seek(self._frame_data_start_position, 0)
 
@@ -307,6 +310,9 @@ class ReCoDeReader:
 
         # load raw data
         raw_d = self._get_frame_raw(d, read_data=read_data)
+        
+        if not read_data:
+            raw_d = self._fp.tell()
 
         # pack and return
         if raw_d is None:
@@ -325,7 +331,15 @@ class ReCoDeReader:
         # start of frame 0 data for recode file)
         self._frame_data_start_position = self._rc_header.get_frame_data_offset(self._is_intermediate,
                                                                                 self._sz_frame_metadata)
-        self._fp.seek(self._frame_data_start_position, 0)
+
+        self._fp.seek(0, 2)
+        file_sz = self._fp.tell()
+        if self._frame_data_start_position <= file_sz:
+            self._fp.seek(self._frame_data_start_position, 0)
+            
+    def get_file_position(self):
+        file_sz = self._fp.tell()
+        return file_sz
 
     def _get_frame_raw(self, frame_metadata, read_data=True):
 

@@ -25,7 +25,7 @@ class ReCoDeWriter:
 
     def __init__(self, image_filename, dark_data=None, dark_filename='', output_directory='', input_params=None,
                  params_filename='', mode='batch', validation_frame_gap=-1, log_filename='recode.log', run_name='run',
-                 verbosity=0, use_c=False, max_count=-1, chunk_time_in_sec=0, node_id=0, buffer_size_in_frames=10):
+                 verbosity=0, use_c=False, max_count=-1, chunk_time_in_sec=0, node_id=0, buffer_size_in_frames=10.0):
         """
         Validates and holds user specified parameters for initializing ReCoDe.
 
@@ -200,6 +200,7 @@ class ReCoDeWriter:
 
         # serialize ReCoDe header
         self._rc_header.serialize_to(self._intermediate_file)
+        self._intermediate_file.flush()
 
         # create validation file
         if self._init_params.validation_frame_gap > 0:
@@ -217,7 +218,7 @@ class ReCoDeWriter:
         self._frame_buffer = bytearray(self._frame_sz)
         self._n_bytes_in_binary_image = math.ceil(_n_pixels_in_frame / 8)
 
-        self._buffer_sz = self._frame_sz * self._buffer_size_in_frames
+        self._buffer_sz = int(np.ceil(self._frame_sz * self._buffer_size_in_frames))
         self._rct_buffer = bytearray(self._buffer_sz)
         self._rct_buffer_fill_position = -1
         self._available_buffer_space = self._buffer_sz
@@ -263,6 +264,7 @@ class ReCoDeWriter:
             # serialize source header
             if self._is_first_chunk:
                 self._source.serialize_header(self._intermediate_file)
+                self._intermediate_file.flush()
 
         else:
             self._source = data

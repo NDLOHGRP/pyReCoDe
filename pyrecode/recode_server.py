@@ -296,9 +296,10 @@ class Logger:
 
 class ReCoDeServer:
 
-    def __init__(self, mode):
+    def __init__(self, mode, buffer_size_in_frames=10.0):
 
         self._mode = mode
+        self._buffer_size_in_frames = buffer_size_in_frames
 
         self._init_params = None
         self._input_params = None
@@ -352,7 +353,8 @@ class ReCoDeServer:
             node_clients.append(node)
             self._node_states[token.node_id] = rc.STATUS_CODE_NOT_READY
             self._node_state_update_timestamps[token.node_id] = datetime.now()
-            rct = ReCoDeNode(token, self._init_params, self._input_params)
+            rct = ReCoDeNode(token, self._init_params, self._input_params,
+                             buffer_size_in_frames=self._buffer_size_in_frames)
             p = Process(target=rct.run,
                         args=(self._session_id, token,
                               self._node_states, self._node_state_update_timestamps, self._logger_state,
@@ -564,13 +566,14 @@ class ReCoDeServer:
 
 class ReCoDeNode:
 
-    def __init__(self, node_token, init_params, input_params):
+    def __init__(self, node_token, init_params, input_params, buffer_size_in_frames=10.0):
         self._node_token = node_token
         self._pid = node_token.node_id
         self._sport = node_token.server_port
         self._pub_port = node_token.publishing_port
         self._init_params = init_params
         self._input_params = input_params
+        self._buffer_size_in_frames = buffer_size_in_frames
 
         self._socket = None
         self._pub_socket = None
@@ -705,7 +708,7 @@ class ReCoDeNode:
                                            max_count=self._init_params.max_count,
                                            chunk_time_in_sec=self._init_params.chunk_time_in_sec,
                                            node_id=self._pid,
-                                           buffer_size_in_frames=10)
+                                           buffer_size_in_frames=self._buffer_size_in_frames)
 
     def _start(self):
         # create output rc part file
