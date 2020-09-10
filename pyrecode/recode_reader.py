@@ -338,8 +338,7 @@ class ReCoDeReader:
             self._fp.seek(self._frame_data_start_position, 0)
             
     def get_file_position(self):
-        file_sz = self._fp.tell()
-        return file_sz
+        return self._fp.tell()
 
     def _get_frame_raw(self, frame_metadata, read_data=True):
 

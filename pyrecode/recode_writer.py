@@ -112,7 +112,7 @@ class ReCoDeWriter:
             else:
                 raise NotImplementedError("No implementation available for loading calibration file of type 'Other'")
             	
-            if _t.ndim > 2:
+            if len(_t.shape) > 2:
                 t = np.squeeze(_t[0])
             else:
                 t = _t
@@ -320,7 +320,8 @@ class ReCoDeWriter:
         n_frames_per_thread = int(math.ceil((n_frames_in_chunk * 1.0) / (self._input_params.num_threads * 1.0)))
         frame_offset = self._node_id * n_frames_per_thread
         available_frames = min(n_frames_per_thread, max(n_frames_in_chunk - frame_offset, 0))
-        # print(n_frames_in_chunk, n_frames_per_thread, self._node_id, available_frames, frame_offset)
+        # print("Node: ", n_frames_in_chunk, n_frames_per_thread, self._node_id, available_frames, frame_offset,
+        # self._chunk_offset)
 
         # read the thread-specific data from chunk into memory
         stt = datetime.now()
@@ -357,7 +358,7 @@ class ReCoDeWriter:
         _statistics = 'max'
         if self._header['reduction_level'] == 2:
 
-            if self._header['L2_statistics'] == 1:
+            if self._header['L2_statistics'] in [0,1]:
                 _statistics = 'max'
 
             elif self._header['L2_statistics'] == 2:
@@ -367,7 +368,7 @@ class ReCoDeWriter:
         _centroiding_scheme = 'weighted_average'
         if self._header['reduction_level'] == 4:
 
-            if self._header['L4_centroiding'] == 1:
+            if self._header['L4_centroiding'] in [0,1]:
                 _centroiding_scheme = 'weighted_average'
 
             elif self._header['L4_centroiding'] == 2:
@@ -419,7 +420,7 @@ class ReCoDeWriter:
                 else:
                     run_metrics[key] = _metrics[key]
 
-        self._chunk_offset += available_frames
+        self._chunk_offset += n_frames_in_chunk
         self._num_frames_in_part += available_frames
 
         run_metrics['run_time'] = datetime.now() - run_start
@@ -442,8 +443,7 @@ class ReCoDeWriter:
             labeled_foreground, num_features = nd.measurements.label(binary_frame, structure=self._s)
 
             if self._header['reduction_level'] == 2:
-                pixel_intensities = get_summary_stats_nb(labeled_foreground, frame, 0, self._header['target_dtype'],
-                                                         _statistics)
+                pixel_intensities = get_summary_stats_nb(labeled_foreground, frame, 0, self._src_dtype, _statistics)
             elif self._header['reduction_level'] == 4:
                 centroids = get_centroids_2D_nb(labeled_foreground, binary_frame, frame, 0, method=_centroiding_scheme)
                 binary_frame = make_binary_map(self._header['nx'], self._header['ny'], centroids)
