@@ -1,3 +1,7 @@
+# pyReCoDe
+Pythonic implementation of the ReCoDe data reduction-compression scheme as described in:   
+Datta, A., Ng, K.F., Balakrishnan, D. et al. A data reduction and compression description for high throughput time-resolved electron microscopy. Nat Commun 12, 664 (2021). https://doi.org/10.1038/s41467-020-20694-z
+
 ### Installation
 Use the following commands to build and install  pyReCoDe:
 1. python setup.py clean --all  
