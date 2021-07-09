@@ -9,7 +9,7 @@ __1. From ReCoDe part files: See `ReCoDe_Live_View`/`ReCoDe_Live_View_MT`/`ReCoD
 
 The `ReCoDe_Live_View` notebook demonstrates a visualisation of ReCoDe data by superimposing all available frames to discern possible areas of interest. As data is captured in intervals and converted into the L1 format by ReCoDe, each part file generated will be read separately by ReCoDeViewer, then combined. Motion blur is not accounted for.
 
-The `ReCoDe_Live_View_MT` notebook achieves the same visualisation as `ReCoDe_Live_View` but allows for multiprocessing. See `ReCoDe_Live_View_example` notebook for an updated version.
+The `ReCoDe_Live_View_MT` notebook achieves the same visualisation as `ReCoDe_Live_View` but allows for multiprocessing. See `ReCoDe_Live_View_example` notebook for a new version.
 
 __2. From v0.1 intermediate/ReCoDe files: See `Reading_ReCoDe_v0.1_Files` notebook.__
 
@@ -24,5 +24,14 @@ The `Fine_Calibration_with_Backscattering` notebook describes in detail the fine
 The `recalibration_and_conversion.py` script may be used to calibrate L1 ReCoDe data and convert L1 to L4. (Refer to paper published at https://doi.org/10.1038/s41467-020-20694-z for the 4 possible data reduction levels.)
 
 ---
+
+__Refer to the various notebooks for conversion from these formats to/from ReCoDe:__
+
+1. Numpy dense array format
+2. TIFF
+3. Gatan DM4 format
+4. Gatan binary format (raw output from K2-IS detector)
+5. Merlin detector
+6. Timepix3
 
 Refer to `recode_server.py` for an example on initialising the ReCoDe Server.
