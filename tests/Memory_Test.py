@@ -3,6 +3,7 @@ import numpy as np
 from pyrecode.params import InputParams, InitParams
 from pyrecode.recode_server import ReCoDeServer
 from pyrecode.recode_reader import ReCoDeReader, merge_parts
+from pyrecode.utils.converters import l1_to_l4_converter
 
 if __name__ == "__main__":
     
@@ -13,8 +14,11 @@ if __name__ == "__main__":
     calib_frame = np.zeros((shape[1], shape[2]), dtype=np.uint16)
 
     # Make randomised data sparse with only ones and zeroes
-    data = np.random.randint(50, size=shape, dtype=np.uint16)
+    data = np.random.randint(10000, size=shape, dtype=np.uint16)
     data[data != 1] = 0
+    
+    # Prepare original data in format that can be compared to RC4 
+    original_data = np.transpose(data[0, :, :])
 
     # Run ReCoDe for each compression scheme
     for scheme in range(12):
@@ -29,6 +33,7 @@ if __name__ == "__main__":
                                      run_name=tag, verbosity=0, use_c=False)
 
         input_params = InputParams()
+        input_params.load('../Memory_Test/recode_params_' + tag + '.txt')
         input_params.nx = shape[1]
         input_params.ny = shape[2]
         input_params.nz = shape[0]
@@ -52,15 +57,15 @@ if __name__ == "__main__":
             print(f"Frame from ReCoDe (compression scheme {scheme} is missing.")
             similar[scheme] = False
         else:
-            frame_id = list(recoded_frame.keys())[0]
-            coo_frame = recoded_frame[frame_id]['data']
-            recovered_frame = coo_frame.todense()
+            # Convert RC1 frame to RC4
+            l4_frame = l1_to_l4_converter(recoded_frame, (shape[1], shape[2]), n_frames=1)
             
-            # np.shape(recovered_frame) is (2048, 2048), but np.shape(data) is (1, 2048, 2048)
-            recovered_data = recovered_frame[np.newaxis, :]
+            frame_id = list(l4_frame.keys())[0]
+            coo_frame = l4_frame[frame_id]['data']
+            recovered_data = coo_frame.toarray().astype(np.uint8)
 
             # Compare recovered data with original data
-            similar[scheme] = np.array_equal(recovered_data, data)
+            similar[scheme] = np.allclose(recovered_data, original_data)
 
         # Check for memory increase
         mem_increase[scheme] = (p0 - psutil.virtual_memory()[3]) / (10**9)
@@ -70,10 +75,11 @@ if __name__ == "__main__":
     error = ''
     
     for i in range(12):
-        if similar[i] == False:
+        if similar[i] == False and i in [0, 2, 5]:
             passed_test = False
             error += f"Compression scheme {i}: ReCoDe data differs from original data.\n"
-        elif mem_increase[i] != 0:
+        if mem_increase[i] != 0:
+            passed_test = False
             error += f"Compression scheme {i}: (Virtual) Memory leak of {mem_increase[i]} GB.\n"
     
     # Return the test result
